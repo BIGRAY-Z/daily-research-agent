@@ -1,0 +1,92 @@
+name: Daily Research Agent
+
+on:
+  schedule:
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Generate reports without sending email"
+        required: false
+        default: "false"
+      skip_llm:
+        description: "Collect only, no LLM calls"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      STAGE1_MODEL: ${{ secrets.STAGE1_MODEL }}
+      STAGE2_MODEL: ${{ secrets.STAGE2_MODEL }}
+      REPORT_MODEL: ${{ secrets.REPORT_MODEL }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      SMTP_USE_SSL: ${{ secrets.SMTP_USE_SSL }}
+      SMTP_STARTTLS: ${{ secrets.SMTP_STARTTLS }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO }}
+      LOOKBACK_DAYS: ${{ vars.LOOKBACK_DAYS || '3' }}
+      MAX_REPORTS: ${{ vars.MAX_REPORTS || '8' }}
+      STAGE1_CONFIDENCE_THRESHOLD: ${{ vars.STAGE1_CONFIDENCE_THRESHOLD || '7' }}
+      LLM_TIMEOUT_SECONDS: ${{ vars.LLM_TIMEOUT_SECONDS || '90' }}
+      REPORT_TIMEOUT_SECONDS: ${{ vars.REPORT_TIMEOUT_SECONDS || '420' }}
+      REPORT_MAX_CHARS: ${{ vars.REPORT_MAX_CHARS || '90000' }}
+      REPORT_LANGUAGE: ${{ vars.REPORT_LANGUAGE || 'zh' }}
+      SEND_EMAIL: ${{ vars.SEND_EMAIL || 'true' }}
+      SKIP_SOURCES: ${{ vars.SKIP_SOURCES || 'false' }}
+      ANTHROPIC_URLS: ${{ vars.ANTHROPIC_URLS || 'https://www.anthropic.com/research' }}
+      TRANSFORMER_CIRCUITS_URLS: ${{ vars.TRANSFORMER_CIRCUITS_URLS || 'https://transformer-circuits.pub/' }}
+      ALIGNMENT_FORUM_URLS: ${{ vars.ALIGNMENT_FORUM_URLS || 'https://www.alignmentforum.org/' }}
+      WORKFLOW_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      WORKFLOW_SKIP_LLM: ${{ github.event.inputs.skip_llm || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest -v
+
+      - name: Run research agent
+        run: |
+          ARGS=""
+          if [ "$WORKFLOW_DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ "$WORKFLOW_SKIP_LLM" = "true" ]; then ARGS="$ARGS --skip-llm"; fi
+          python -m research_agent run $ARGS
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-agent-reports
+          path: |
+            reports/**
+            data/state.json
+          if-no-files-found: ignore
+
+      - name: Commit state and reports
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/state.json || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update daily research agent state"
+            git push
+          fi
