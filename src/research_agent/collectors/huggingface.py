@@ -35,7 +35,7 @@ class HuggingFacePapersCollector:
         for link in soup.select('a[href^="/papers/"]'):
             title = clean_text(link.get_text(" "))
             href = link.get("href", "")
-            if not title or not href:
+            if not title or not href or not self._looks_like_paper_title(title):
                 continue
             url = urljoin("https://huggingface.co", href)
             if url in candidates:
@@ -56,6 +56,16 @@ class HuggingFacePapersCollector:
             )
             candidates[url] = candidate
         return list(candidates.values())[:80]
+
+    def _looks_like_paper_title(self, title: str) -> bool:
+        if len(title) < 12 or len(title) > 260:
+            return False
+        if title.isdigit():
+            return False
+        if sum(character.isalpha() for character in title) < 8:
+            return False
+        blocked = {"previous", "next", "daily papers", "papers", "submit"}
+        return title.strip().lower() not in blocked
 
     def _date_from_url(self, url: str) -> datetime | None:
         tail = url.rstrip("/").split("/")[-1]
