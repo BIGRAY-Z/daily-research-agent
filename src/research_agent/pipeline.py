@@ -89,10 +89,11 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
     state = load_state(config.state_path)
     candidates = collect_candidates(config)
     fresh_candidates = [candidate for candidate in candidates if not candidate_seen(state, candidate)]
+    already_processed_count = len(candidates) - len(fresh_candidates)
     LOGGER.info("Collected %d candidates; %d are fresh", len(candidates), len(fresh_candidates))
 
     if skip_llm:
-        digest = _build_collect_only_digest(run_date, fresh_candidates, len(candidates) - len(fresh_candidates))
+        digest = _build_collect_only_digest(run_date, fresh_candidates, already_processed_count)
         markdown_path, json_path, html_path = write_digest_artifacts(config.report_dir, digest)
         pdf_path = make_pdf_artifact(html_path)
         return RunResult(digest=digest, markdown_path=markdown_path, json_path=json_path, html_path=html_path, pdf_path=pdf_path, email_sent=False)
@@ -103,14 +104,16 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
         timeout_seconds=config.llm_timeout_seconds,
     )
     relevant: list[tuple[Candidate, RelevanceDecision]] = []
-    skipped_count = len(candidates) - len(fresh_candidates)
+    stage1_filtered_count = 0
+    stage2_filtered_count = 0
+    report_failure_count = 0
     for index, candidate in enumerate(fresh_candidates, start=1):
         LOGGER.info("Stage 1 relevance %d/%d: %s", index, len(fresh_candidates), candidate.title)
         decision = classify_relevance(llm, config, candidate)
         if decision.relevant and decision.confidence >= config.stage1_confidence_threshold:
             relevant.append((candidate, decision))
         else:
-            skipped_count += 1
+            stage1_filtered_count += 1
     LOGGER.info("Stage 1 kept %d candidates", len(relevant))
 
     scored: list[tuple[Candidate, RelevanceDecision, QualityScore]] = []
@@ -120,12 +123,13 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
         if score.priority != "skip":
             scored.append((candidate, decision, score))
         else:
-            skipped_count += 1
+            stage2_filtered_count += 1
 
     ranked = select_top_candidates([(candidate, score) for candidate, _, score in scored], len(scored))
     LOGGER.info("Selected up to %d reports from %d scored candidates", config.max_reports, len(scored))
     decision_by_id = {candidate.id: decision for candidate, decision, _ in scored}
     reports: list[DeepReport] = []
+    failed_reports: list[tuple[Candidate, RelevanceDecision, QualityScore, str]] = []
     session = build_session()
     for index, (candidate, score) in enumerate(ranked, start=1):
         if len(reports) >= config.max_reports:
@@ -136,7 +140,8 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
             document_text, text_source = load_document_text(session, candidate)
             markdown = generate_report(llm, config, candidate, document_text)
         except Exception as exc:
-            skipped_count += 1
+            report_failure_count += 1
+            failed_reports.append((candidate, decision, score, str(exc)))
             LOGGER.warning("Report generation failed for %s; trying next candidate: %s", candidate.title, exc)
             continue
         reports.append(
@@ -151,11 +156,21 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
         if not dry_run:
             mark_candidate_seen(state, candidate, now.isoformat())
 
+    if not reports and failed_reports:
+        LOGGER.warning("All report-generation attempts failed; emitting fallback candidate summaries")
+        for candidate, decision, score, error in failed_reports[: config.max_reports]:
+            reports.append(build_report_failure_fallback(candidate, decision, score, error))
+
+    skipped_count = already_processed_count + stage1_filtered_count + stage2_filtered_count + report_failure_count
     digest = DailyDigest(
         run_date=run_date,
         reports=reports,
         skipped_count=skipped_count,
         candidate_count=len(candidates),
+        already_processed_count=already_processed_count,
+        stage1_filtered_count=stage1_filtered_count,
+        stage2_filtered_count=stage2_filtered_count,
+        report_failure_count=report_failure_count,
     )
     markdown_path, json_path, html_path = write_digest_artifacts(config.report_dir, digest)
     pdf_path = make_pdf_artifact(html_path)
@@ -272,6 +287,28 @@ def make_pdf_artifact(html_path: Path) -> Path | None:
         return None
 
 
+def build_report_failure_fallback(
+    candidate: Candidate,
+    decision: RelevanceDecision,
+    score: QualityScore,
+    error: str,
+) -> DeepReport:
+    markdown = f"""## 深度报告生成失败
+
+这篇文章通过了粗筛和质量评分，但报告模型或中转站在生成长报告时失败。本条目保留为候选摘要，失败文章不会写入已处理状态，后续自动运行仍会重试。
+
+- 失败原因: {clean_text(error)}
+- 候选摘要: {candidate.abstract or candidate.body_text or "No abstract extracted."}
+"""
+    return DeepReport(
+        candidate=candidate,
+        relevance=decision,
+        score=score,
+        markdown=markdown,
+        text_source="report_generation_failed",
+    )
+
+
 def artifact_run_id(now: datetime, dry_run: bool) -> str:
     if dry_run:
         return f"dry-run-{now.strftime('%Y-%m-%d-%H%M%S')}"
@@ -314,4 +351,5 @@ def _build_collect_only_digest(run_date: str, candidates: list[Candidate], skipp
         reports=reports,
         skipped_count=skipped_count,
         candidate_count=len(candidates),
+        already_processed_count=skipped_count,
     )

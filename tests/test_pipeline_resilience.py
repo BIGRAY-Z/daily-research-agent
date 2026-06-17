@@ -64,3 +64,45 @@ def test_run_pipeline_skips_failed_report_and_tries_next_candidate(monkeypatch, 
     state = load_state(config.state_path)
     assert first.id not in state.processed
     assert second.id in state.processed
+
+
+def test_run_pipeline_emits_fallback_when_all_reports_fail(monkeypatch, tmp_path):
+    first = make_candidate(1, "Top Paper")
+    second = make_candidate(2, "Fallback Paper")
+    config = AppConfig(
+        openai_base_url="https://example.com/v1",
+        openai_api_key="key",
+        stage1_model="stage1",
+        stage2_model="stage2",
+        report_model="report",
+        max_reports=1,
+        send_email=False,
+        state_path=tmp_path / "state.json",
+        report_dir=tmp_path / "reports",
+    )
+
+    monkeypatch.setattr("research_agent.pipeline.collect_candidates", lambda cfg: [first, second])
+    monkeypatch.setattr(
+        "research_agent.pipeline.classify_relevance",
+        lambda llm, cfg, candidate: RelevanceDecision(True, "AI Alignment", 10, "relevant"),
+    )
+    monkeypatch.setattr(
+        "research_agent.pipeline.score_candidate",
+        lambda llm, cfg, candidate, relevance: QualityScore(9, 9, 9, 9, 9, 9, "strong", "reason"),
+    )
+    monkeypatch.setattr("research_agent.pipeline.load_document_text", lambda session, candidate: ("document", "pdf"))
+    monkeypatch.setattr(
+        "research_agent.pipeline.generate_report",
+        lambda llm, cfg, candidate, document_text: (_ for _ in ()).throw(LLMError("503 Service Unavailable")),
+    )
+
+    result = run_pipeline(config)
+
+    assert len(result.digest.reports) == 1
+    assert result.digest.report_failure_count == 2
+    assert result.digest.reports[0].text_source == "report_generation_failed"
+    assert "深度报告生成失败" in result.digest.reports[0].markdown
+
+    state = load_state(config.state_path)
+    assert first.id not in state.processed
+    assert second.id not in state.processed

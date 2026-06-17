@@ -58,6 +58,10 @@ class DailyDigest:
     reports: list[DeepReport]
     skipped_count: int = 0
     candidate_count: int = 0
+    already_processed_count: int = 0
+    stage1_filtered_count: int = 0
+    stage2_filtered_count: int = 0
+    report_failure_count: int = 0
 
 
 @dataclass(slots=True)

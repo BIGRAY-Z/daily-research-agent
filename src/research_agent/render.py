@@ -20,6 +20,22 @@ def render_digest_markdown(digest: DailyDigest) -> str:
     ]
     if digest.candidate_count:
         lines.append(f"- Raw candidates: {digest.candidate_count}")
+    if any(
+        [
+            digest.already_processed_count,
+            digest.stage1_filtered_count,
+            digest.stage2_filtered_count,
+            digest.report_failure_count,
+        ]
+    ):
+        lines.extend(
+            [
+                f"- Already processed: {digest.already_processed_count}",
+                f"- Stage 1 filtered: {digest.stage1_filtered_count}",
+                f"- Stage 2 filtered: {digest.stage2_filtered_count}",
+                f"- Report generation failed: {digest.report_failure_count}",
+            ]
+        )
     lines.append("")
 
     if not digest.reports:
@@ -133,7 +149,7 @@ def render_digest_html(digest: DailyDigest) -> str:
     }}
     .summary {{
       display: grid;
-      grid-template-columns: repeat(3, minmax(120px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
       gap: 10px;
       min-width: min(420px, 100%);
     }}
@@ -231,6 +247,10 @@ def render_digest_html(digest: DailyDigest) -> str:
         <div><span>精选报告</span><strong>{len(digest.reports)}</strong></div>
         <div><span>跳过/已处理</span><strong>{digest.skipped_count}</strong></div>
         <div><span>原始候选</span><strong>{digest.candidate_count}</strong></div>
+        <div><span>已处理</span><strong>{digest.already_processed_count}</strong></div>
+        <div><span>粗筛过滤</span><strong>{digest.stage1_filtered_count}</strong></div>
+        <div><span>质量过滤</span><strong>{digest.stage2_filtered_count}</strong></div>
+        <div><span>报告失败</span><strong>{digest.report_failure_count}</strong></div>
       </div>
     </section>
     {''.join(cards)}
