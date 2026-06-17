@@ -26,6 +26,7 @@ jobs:
       STAGE1_MODEL: ${{ vars.STAGE1_MODEL }}
       STAGE2_MODEL: ${{ vars.STAGE2_MODEL }}
       REPORT_MODEL: ${{ vars.REPORT_MODEL }}
+      REPORT_FALLBACK_MODEL: ${{ vars.REPORT_FALLBACK_MODEL }}
       SMTP_HOST: ${{ vars.SMTP_HOST }}
       SMTP_PORT: ${{ vars.SMTP_PORT }}
       SMTP_USERNAME: ${{ vars.SMTP_USERNAME }}
@@ -40,6 +41,9 @@ jobs:
       LLM_TIMEOUT_SECONDS: ${{ vars.LLM_TIMEOUT_SECONDS || '90' }}
       REPORT_TIMEOUT_SECONDS: ${{ vars.REPORT_TIMEOUT_SECONDS || '420' }}
       REPORT_MAX_CHARS: ${{ vars.REPORT_MAX_CHARS || '90000' }}
+      REPORT_FALLBACK_MAX_CHARS: ${{ vars.REPORT_FALLBACK_MAX_CHARS || '25000' }}
+      REPORT_MAX_RETRIES: ${{ vars.REPORT_MAX_RETRIES || '1' }}
+      REPORT_CONSECUTIVE_FAILURE_LIMIT: ${{ vars.REPORT_CONSECUTIVE_FAILURE_LIMIT || '2' }}
       REPORT_LANGUAGE: ${{ vars.REPORT_LANGUAGE || 'zh' }}
       SEND_EMAIL: ${{ vars.SEND_EMAIL || 'true' }}
       SKIP_SOURCES: ${{ vars.SKIP_SOURCES || 'false' }}

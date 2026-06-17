@@ -130,9 +130,16 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
     decision_by_id = {candidate.id: decision for candidate, decision, _ in scored}
     reports: list[DeepReport] = []
     failed_reports: list[tuple[Candidate, RelevanceDecision, QualityScore, str]] = []
+    consecutive_report_failures = 0
     session = build_session()
     for index, (candidate, score) in enumerate(ranked, start=1):
         if len(reports) >= config.max_reports:
+            break
+        if consecutive_report_failures >= config.report_consecutive_failure_limit:
+            LOGGER.warning(
+                "Stopping report generation after %d consecutive failures; emitting fallback summaries",
+                consecutive_report_failures,
+            )
             break
         LOGGER.info("Generating report %d/%d: %s", index, len(ranked), candidate.title)
         decision = decision_by_id[candidate.id]
@@ -141,9 +148,11 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
             markdown = generate_report(llm, config, candidate, document_text)
         except Exception as exc:
             report_failure_count += 1
+            consecutive_report_failures += 1
             failed_reports.append((candidate, decision, score, str(exc)))
             LOGGER.warning("Report generation failed for %s; trying next candidate: %s", candidate.title, exc)
             continue
+        consecutive_report_failures = 0
         reports.append(
             DeepReport(
                 candidate=candidate,
@@ -253,24 +262,45 @@ def extract_article_text(html: str) -> str:
 
 
 def generate_report(llm: LLMClient, config: AppConfig, candidate: Candidate, document_text: str) -> str:
-    report_llm = LLMClient(
-        config.openai_base_url,
-        config.openai_api_key,
-        timeout_seconds=config.report_timeout_seconds,
-    )
-    prepared_text = prepare_report_text(document_text, config.report_max_chars)
-    LOGGER.info(
-        "Report input for %s: %d chars truncated to %d chars; timeout=%ss",
-        candidate.title,
-        len(document_text),
-        len(prepared_text),
-        config.report_timeout_seconds,
-    )
-    messages = [
-        {"role": "system", "content": REPORT_SYSTEM_PROMPT},
-        {"role": "user", "content": report_user_prompt(candidate, prepared_text)},
+    report_llm = llm if isinstance(llm, LLMClient) else llm
+    if isinstance(llm, LLMClient):
+        report_llm = LLMClient(
+            config.openai_base_url,
+            config.openai_api_key,
+            timeout_seconds=config.report_timeout_seconds,
+            max_retries=config.report_max_retries,
+        )
+    primary_chars = config.report_max_chars
+    fallback_chars = min(config.report_fallback_max_chars, primary_chars)
+    attempts = [
+        (config.report_model, primary_chars, "primary"),
+        (config.report_model, fallback_chars, "short-context"),
+        (config.report_fallback_model or config.stage2_model, fallback_chars, "fallback-model"),
     ]
-    return report_llm.chat(config.report_model, messages, temperature=0.2)
+    errors: list[str] = []
+    for model, max_chars, label in attempts:
+        if not model:
+            continue
+        prepared_text = prepare_report_text(document_text, max_chars)
+        LOGGER.info(
+            "Report input for %s [%s/%s]: %d chars truncated to %d chars; timeout=%ss",
+            candidate.title,
+            label,
+            model,
+            len(document_text),
+            len(prepared_text),
+            config.report_timeout_seconds,
+        )
+        messages = [
+            {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+            {"role": "user", "content": report_user_prompt(candidate, prepared_text)},
+        ]
+        try:
+            return report_llm.chat(model, messages, temperature=0.2)
+        except Exception as exc:
+            errors.append(f"{label}/{model}: {exc}")
+            LOGGER.warning("Report attempt failed for %s [%s/%s]: %s", candidate.title, label, model, exc)
+    raise RuntimeError("; ".join(errors) or "No report model configured")
 
 
 def prepare_report_text(document_text: str, max_chars: int) -> str:

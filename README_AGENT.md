@@ -104,6 +104,7 @@ OPENAI_API_KEY=sk-...
 STAGE1_MODEL=cheap-json-model
 STAGE2_MODEL=kimi-or-claude-sonnet
 REPORT_MODEL=gpt5.5xhigh
+REPORT_FALLBACK_MODEL=kimi-or-claude-sonnet
 
 SMTP_HOST=smtp.example.com
 SMTP_PORT=465
@@ -124,6 +125,9 @@ STAGE1_CONFIDENCE_THRESHOLD=7
 LLM_TIMEOUT_SECONDS=90
 REPORT_TIMEOUT_SECONDS=420
 REPORT_MAX_CHARS=90000
+REPORT_FALLBACK_MAX_CHARS=25000
+REPORT_MAX_RETRIES=1
+REPORT_CONSECUTIVE_FAILURE_LIMIT=2
 REPORT_LANGUAGE=zh
 SEND_EMAIL=true
 STATE_PATH=data/state.json
@@ -198,27 +202,34 @@ git push -u origin main
 5. 在 `Secrets` 添加：
 
 ```text
-OPENAI_BASE_URL
 OPENAI_API_KEY
+SMTP_PASSWORD
+```
+
+6. 在 `Variables` 添加：
+
+```text
+OPENAI_BASE_URL
 STAGE1_MODEL
 STAGE2_MODEL
 REPORT_MODEL
+REPORT_FALLBACK_MODEL
 SMTP_HOST
 SMTP_PORT
 SMTP_USERNAME
-SMTP_PASSWORD
 SMTP_USE_SSL
 SMTP_STARTTLS
 EMAIL_FROM
 EMAIL_TO
-```
-
-6. 在 `Variables` 可选添加：
-
-```text
 LOOKBACK_DAYS=3
-MAX_REPORTS=6
-STAGE1_CONFIDENCE_THRESHOLD=6
+MAX_REPORTS=8
+STAGE1_CONFIDENCE_THRESHOLD=7
+LLM_TIMEOUT_SECONDS=90
+REPORT_TIMEOUT_SECONDS=420
+REPORT_MAX_CHARS=90000
+REPORT_FALLBACK_MAX_CHARS=25000
+REPORT_MAX_RETRIES=1
+REPORT_CONSECUTIVE_FAILURE_LIMIT=2
 REPORT_LANGUAGE=zh
 SEND_EMAIL=true
 SKIP_SOURCES=false
@@ -227,16 +238,18 @@ TRANSFORMER_CIRCUITS_URLS=https://transformer-circuits.pub/
 ALIGNMENT_FORUM_URLS=https://www.alignmentforum.org/
 ```
 
-7. 进入 `Actions -> Daily Research Agent -> Run workflow`。
-8. 第一次建议：
+7. `REPORT_FALLBACK_MODEL` 可以先填和 `STAGE2_MODEL` 相同的稳定模型；如果留空，程序会自动用 `STAGE2_MODEL` 兜底。
+8. `REPORT_MAX_RETRIES=1` 表示每种报告策略只请求一次；`REPORT_CONSECUTIVE_FAILURE_LIMIT=2` 表示连续两篇报告失败就停止继续打长报告，改发候选 fallback 摘要。
+9. 进入 `Actions -> Daily Research Agent -> Run workflow`。
+10. 第一次建议：
    - `dry_run=true`
    - `skip_llm=true`
    这样只验证抓取、测试、报告 artifact，不调用 LLM，不发邮件。
-9. 第二次建议：
+11. 第二次建议：
    - `dry_run=true`
    - `skip_llm=false`
    验证中转站 API 和报告生成。
-10. 第三次再用：
+12. 第三次再用：
    - `dry_run=false`
    - `skip_llm=false`
    验证真实邮件发送。
