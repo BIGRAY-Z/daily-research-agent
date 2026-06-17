@@ -127,6 +127,15 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
 
     ranked = select_top_candidates([(candidate, score) for candidate, _, score in scored], len(scored))
     LOGGER.info("Selected up to %d reports from %d scored candidates", config.max_reports, len(scored))
+    LOGGER.info(
+        "Report generation config: model=%s fallback_model=%s max_chars=%d fallback_max_chars=%d max_retries=%d consecutive_failure_limit=%d",
+        config.report_model,
+        config.report_fallback_model or config.stage2_model,
+        config.report_max_chars,
+        config.report_fallback_max_chars,
+        config.report_max_retries,
+        config.report_consecutive_failure_limit,
+    )
     decision_by_id = {candidate.id: decision for candidate, decision, _ in scored}
     reports: list[DeepReport] = []
     failed_reports: list[tuple[Candidate, RelevanceDecision, QualityScore, str]] = []

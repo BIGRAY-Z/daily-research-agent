@@ -70,6 +70,17 @@ def test_build_email_message_sets_headers():
     assert msg["To"] == "to@example.com"
 
 
+def test_build_email_message_plain_text_uses_utf8_charset():
+    msg = build_email_message(
+        subject="Daily Report",
+        body_markdown="高度贴合 Alignment",
+        sender="from@example.com",
+        recipients=["to@example.com"],
+    )
+    assert msg.get_content_charset() == "utf-8"
+    assert msg.get_content() == "高度贴合 Alignment\n"
+
+
 def test_build_email_message_attaches_pdf_with_application_pdf(tmp_path):
     pdf_path = tmp_path / "digest.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n")

@@ -70,7 +70,7 @@ jobs:
       - name: Check required runtime configuration
         run: |
           missing=0
-          for name in OPENAI_BASE_URL OPENAI_API_KEY STAGE1_MODEL STAGE2_MODEL REPORT_MODEL SMTP_HOST SMTP_USERNAME SMTP_PASSWORD EMAIL_FROM EMAIL_TO; do
+          for name in OPENAI_BASE_URL OPENAI_API_KEY STAGE1_MODEL STAGE2_MODEL REPORT_MODEL REPORT_MAX_RETRIES REPORT_CONSECUTIVE_FAILURE_LIMIT SMTP_HOST SMTP_USERNAME SMTP_PASSWORD EMAIL_FROM EMAIL_TO; do
             if [ -n "${!name}" ]; then
               echo "$name=SET"
             else
