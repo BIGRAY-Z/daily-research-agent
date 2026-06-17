@@ -122,16 +122,23 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
         else:
             skipped_count += 1
 
-    ranked = select_top_candidates([(candidate, score) for candidate, _, score in scored], config.max_reports)
-    LOGGER.info("Selected %d reports from %d scored candidates", len(ranked), len(scored))
+    ranked = select_top_candidates([(candidate, score) for candidate, _, score in scored], len(scored))
+    LOGGER.info("Selected up to %d reports from %d scored candidates", config.max_reports, len(scored))
     decision_by_id = {candidate.id: decision for candidate, decision, _ in scored}
     reports: list[DeepReport] = []
     session = build_session()
     for index, (candidate, score) in enumerate(ranked, start=1):
+        if len(reports) >= config.max_reports:
+            break
         LOGGER.info("Generating report %d/%d: %s", index, len(ranked), candidate.title)
         decision = decision_by_id[candidate.id]
-        document_text, text_source = load_document_text(session, candidate)
-        markdown = generate_report(llm, config, candidate, document_text)
+        try:
+            document_text, text_source = load_document_text(session, candidate)
+            markdown = generate_report(llm, config, candidate, document_text)
+        except Exception as exc:
+            skipped_count += 1
+            LOGGER.warning("Report generation failed for %s; trying next candidate: %s", candidate.title, exc)
+            continue
         reports.append(
             DeepReport(
                 candidate=candidate,

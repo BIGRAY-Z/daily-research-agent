@@ -55,8 +55,15 @@ class LLMClient:
             except Exception as exc:  # requests and schema errors should share retry behavior.
                 last_error = exc
                 if attempt < self.max_retries - 1:
-                    time.sleep(2**attempt)
+                    time.sleep(self._retry_delay_seconds(exc, attempt))
         raise LLMError(f"LLM request failed after {self.max_retries} attempts: {last_error}")
+
+    def _retry_delay_seconds(self, exc: Exception, attempt: int) -> int:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code == 429 or (isinstance(status_code, int) and status_code >= 500):
+            return 8 * (2**attempt)
+        return 2**attempt
 
     def chat_json(
         self,
