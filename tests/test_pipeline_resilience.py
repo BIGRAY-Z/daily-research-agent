@@ -181,3 +181,70 @@ def test_run_pipeline_stops_report_attempts_after_consecutive_failures(monkeypat
     assert result.digest.report_failure_count == 2
     assert len(result.digest.reports) == 2
     assert all(report.text_source == "report_generation_failed" for report in result.digest.reports)
+
+
+def test_run_pipeline_continues_after_stage1_llm_failure(monkeypatch, tmp_path):
+    first = make_candidate(1, "Broken Classifier Paper")
+    second = make_candidate(2, "Good Paper")
+    config = AppConfig(
+        openai_base_url="https://example.com/v1",
+        openai_api_key="key",
+        stage1_model="stage1",
+        stage2_model="stage2",
+        report_model="report",
+        max_reports=1,
+        send_email=False,
+        state_path=tmp_path / "state.json",
+        report_dir=tmp_path / "reports",
+    )
+
+    monkeypatch.setattr("research_agent.pipeline.collect_candidates", lambda cfg: [first, second])
+
+    def fake_classify(llm, cfg, candidate):
+        if candidate.id == first.id:
+            raise LLMError("502 Bad Gateway")
+        return RelevanceDecision(True, "AI Alignment", 10, "relevant")
+
+    monkeypatch.setattr("research_agent.pipeline.classify_relevance", fake_classify)
+    monkeypatch.setattr(
+        "research_agent.pipeline.score_candidate",
+        lambda llm, cfg, candidate, relevance: QualityScore(9, 9, 9, 9, 9, 9, "strong", "reason"),
+    )
+    monkeypatch.setattr("research_agent.pipeline.load_document_text", lambda session, candidate: ("document", "pdf"))
+    monkeypatch.setattr("research_agent.pipeline.generate_report", lambda llm, cfg, candidate, document_text: "## TL;DR\nok")
+
+    result = run_pipeline(config)
+
+    assert [report.candidate.id for report in result.digest.reports] == [second.id]
+    assert result.digest.stage1_failure_count == 1
+
+
+def test_run_pipeline_stage1_failures_trigger_collect_only_fallback(monkeypatch, tmp_path):
+    candidates = [make_candidate(idx, f"Paper {idx}") for idx in range(1, 5)]
+    config = AppConfig(
+        openai_base_url="https://example.com/v1",
+        openai_api_key="key",
+        stage1_model="stage1",
+        stage2_model="stage2",
+        report_model="report",
+        report_consecutive_failure_limit=2,
+        send_email=False,
+        state_path=tmp_path / "state.json",
+        report_dir=tmp_path / "reports",
+    )
+
+    monkeypatch.setattr("research_agent.pipeline.collect_candidates", lambda cfg: candidates)
+
+    attempted: list[str] = []
+
+    def fail_classify(llm, cfg, candidate):
+        attempted.append(candidate.id)
+        raise LLMError("502 Bad Gateway")
+
+    monkeypatch.setattr("research_agent.pipeline.classify_relevance", fail_classify)
+
+    result = run_pipeline(config)
+
+    assert attempted == ["id-1", "id-2"]
+    assert result.digest.stage1_failure_count == 2
+    assert [report.text_source for report in result.digest.reports] == ["metadata", "metadata", "metadata", "metadata"]

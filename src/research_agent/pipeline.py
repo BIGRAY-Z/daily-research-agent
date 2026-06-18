@@ -106,10 +106,23 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
     relevant: list[tuple[Candidate, RelevanceDecision]] = []
     stage1_filtered_count = 0
     stage2_filtered_count = 0
+    stage1_failure_count = 0
+    stage2_failure_count = 0
     report_failure_count = 0
+    consecutive_stage1_failures = 0
     for index, candidate in enumerate(fresh_candidates, start=1):
+        if consecutive_stage1_failures >= config.report_consecutive_failure_limit:
+            LOGGER.warning("Stopping Stage 1 after %d consecutive LLM failures", consecutive_stage1_failures)
+            break
         LOGGER.info("Stage 1 relevance %d/%d: %s", index, len(fresh_candidates), candidate.title)
-        decision = classify_relevance(llm, config, candidate)
+        try:
+            decision = classify_relevance(llm, config, candidate)
+        except Exception as exc:
+            stage1_failure_count += 1
+            consecutive_stage1_failures += 1
+            LOGGER.warning("Stage 1 relevance failed for %s; skipping candidate: %s", candidate.title, exc)
+            continue
+        consecutive_stage1_failures = 0
         if decision.relevant and decision.confidence >= config.stage1_confidence_threshold:
             relevant.append((candidate, decision))
         else:
@@ -117,13 +130,49 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
     LOGGER.info("Stage 1 kept %d candidates", len(relevant))
 
     scored: list[tuple[Candidate, RelevanceDecision, QualityScore]] = []
+    consecutive_stage2_failures = 0
     for index, (candidate, decision) in enumerate(relevant, start=1):
+        if consecutive_stage2_failures >= config.report_consecutive_failure_limit:
+            LOGGER.warning("Stopping Stage 2 after %d consecutive LLM failures", consecutive_stage2_failures)
+            break
         LOGGER.info("Stage 2 scoring %d/%d: %s", index, len(relevant), candidate.title)
-        score = score_candidate(llm, config, candidate, decision)
+        try:
+            score = score_candidate(llm, config, candidate, decision)
+        except Exception as exc:
+            stage2_failure_count += 1
+            consecutive_stage2_failures += 1
+            LOGGER.warning("Stage 2 scoring failed for %s; skipping candidate: %s", candidate.title, exc)
+            continue
+        consecutive_stage2_failures = 0
         if score.priority != "skip":
             scored.append((candidate, decision, score))
         else:
             stage2_filtered_count += 1
+
+    if not scored and stage1_failure_count and fresh_candidates:
+        LOGGER.warning("No scored candidates after LLM failures; emitting collect-only fallback summaries")
+        digest = _build_collect_only_digest(run_date, fresh_candidates, already_processed_count)
+        digest.stage1_failure_count = stage1_failure_count
+        digest.stage2_failure_count = stage2_failure_count
+        digest.skipped_count = already_processed_count + stage1_failure_count + stage2_failure_count
+        digest.candidate_count = len(candidates)
+        markdown_path, json_path, html_path = write_digest_artifacts(config.report_dir, digest)
+        pdf_path = make_pdf_artifact(html_path)
+        if not dry_run:
+            save_state(config.state_path, state)
+        email_sent = False
+        if config.send_email and not dry_run:
+            body = render_digest_markdown(digest)
+            send_email(
+                smtp=config.smtp_config(),
+                subject=f"AI Safety Research Daily - {run_date}",
+                body_markdown=body,
+                sender=config.email_from,
+                recipients=config.email_to,
+                attachments=[path for path in [pdf_path, html_path, json_path] if path is not None],
+            )
+            email_sent = True
+        return RunResult(digest=digest, markdown_path=markdown_path, json_path=json_path, html_path=html_path, pdf_path=pdf_path, email_sent=email_sent)
 
     ranked = select_top_candidates([(candidate, score) for candidate, _, score in scored], len(scored))
     LOGGER.info("Selected up to %d reports from %d scored candidates", config.max_reports, len(scored))
@@ -179,7 +228,14 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
         for candidate, decision, score, error in failed_reports[: config.max_reports]:
             reports.append(build_report_failure_fallback(candidate, decision, score, error))
 
-    skipped_count = already_processed_count + stage1_filtered_count + stage2_filtered_count + report_failure_count
+    skipped_count = (
+        already_processed_count
+        + stage1_filtered_count
+        + stage2_filtered_count
+        + stage1_failure_count
+        + stage2_failure_count
+        + report_failure_count
+    )
     digest = DailyDigest(
         run_date=run_date,
         reports=reports,
@@ -188,6 +244,8 @@ def run_pipeline(config: AppConfig, *, dry_run: bool = False, skip_llm: bool = F
         already_processed_count=already_processed_count,
         stage1_filtered_count=stage1_filtered_count,
         stage2_filtered_count=stage2_filtered_count,
+        stage1_failure_count=stage1_failure_count,
+        stage2_failure_count=stage2_failure_count,
         report_failure_count=report_failure_count,
     )
     markdown_path, json_path, html_path = write_digest_artifacts(config.report_dir, digest)

@@ -53,3 +53,22 @@ def test_llm_client_uses_longer_backoff_for_rate_limit_and_server_errors(monkeyp
         client.chat("model", [{"role": "user", "content": "hi"}])
 
     assert sleeps == [8, 16]
+
+
+def test_llm_client_repairs_mojibake_text_response(monkeypatch):
+    class Response:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+        text = '{"choices":[{"message":{"content":"# TL;DRï¼ˆä¸€å¥è¯æ€»ç»“ï¼‰"}}]}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "# TL;DRï¼ˆä¸€å¥è¯æ€»ç»“ï¼‰"}}]}
+
+    monkeypatch.setattr("research_agent.llm.requests.post", lambda *args, **kwargs: Response())
+
+    client = LLMClient("https://example.com/v1", "key", max_retries=1)
+
+    assert client.chat("model", [{"role": "user", "content": "hi"}]) == "# TL;DR（一句话总结）"

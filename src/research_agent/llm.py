@@ -7,7 +7,7 @@ from typing import Any
 
 import requests
 
-from research_agent.text import extract_json_object
+from research_agent.text import extract_json_object, repair_mojibake
 
 
 class LLMError(RuntimeError):
@@ -51,7 +51,7 @@ class LLMClient:
                         f"body_prefix={prefix!r}. Check OPENAI_BASE_URL; OpenAI-compatible API roots "
                         "usually ends with /v1."
                     ) from exc
-                return data["choices"][0]["message"]["content"]
+                return repair_mojibake(data["choices"][0]["message"]["content"])
             except Exception as exc:  # requests and schema errors should share retry behavior.
                 last_error = exc
                 if attempt < self.max_retries - 1:

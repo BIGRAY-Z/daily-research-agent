@@ -25,6 +25,8 @@ def render_digest_markdown(digest: DailyDigest) -> str:
             digest.already_processed_count,
             digest.stage1_filtered_count,
             digest.stage2_filtered_count,
+            digest.stage1_failure_count,
+            digest.stage2_failure_count,
             digest.report_failure_count,
         ]
     ):
@@ -33,6 +35,8 @@ def render_digest_markdown(digest: DailyDigest) -> str:
                 f"- Already processed: {digest.already_processed_count}",
                 f"- Stage 1 filtered: {digest.stage1_filtered_count}",
                 f"- Stage 2 filtered: {digest.stage2_filtered_count}",
+                f"- Stage 1 LLM failed: {digest.stage1_failure_count}",
+                f"- Stage 2 LLM failed: {digest.stage2_failure_count}",
                 f"- Report generation failed: {digest.report_failure_count}",
             ]
         )
@@ -250,6 +254,8 @@ def render_digest_html(digest: DailyDigest) -> str:
         <div><span>已处理</span><strong>{digest.already_processed_count}</strong></div>
         <div><span>粗筛过滤</span><strong>{digest.stage1_filtered_count}</strong></div>
         <div><span>质量过滤</span><strong>{digest.stage2_filtered_count}</strong></div>
+        <div><span>粗筛失败</span><strong>{digest.stage1_failure_count}</strong></div>
+        <div><span>质量失败</span><strong>{digest.stage2_failure_count}</strong></div>
         <div><span>报告失败</span><strong>{digest.report_failure_count}</strong></div>
       </div>
     </section>

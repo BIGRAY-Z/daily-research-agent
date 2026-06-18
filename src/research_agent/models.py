@@ -61,6 +61,8 @@ class DailyDigest:
     already_processed_count: int = 0
     stage1_filtered_count: int = 0
     stage2_filtered_count: int = 0
+    stage1_failure_count: int = 0
+    stage2_failure_count: int = 0
     report_failure_count: int = 0
 
 
