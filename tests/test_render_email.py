@@ -27,6 +27,58 @@ def test_render_digest_contains_title_and_score():
     assert "Overall: 9" in markdown
 
 
+def test_render_digest_markdown_starts_reports_with_daily_overview():
+    candidate = Candidate(
+        id="id-1",
+        source="arxiv",
+        title="A Good MI Paper",
+        url="https://example.com/paper",
+        published_at=datetime(2026, 6, 16, tzinfo=timezone.utc),
+        abstract="abstract fallback",
+    )
+    report = DeepReport(
+        candidate=candidate,
+        relevance=RelevanceDecision(True, "Mechanistic Interpretability", 9, "relevant"),
+        score=QualityScore(9, 8, 9, 9, 8, 9, "must_read", "strong selection reason"),
+        markdown="## TL;DR\n这篇文章提出了一个清晰的机制解释方法。\n\n## Details\nLong report.",
+        text_source="pdf",
+    )
+    digest = DailyDigest(run_date="2026-06-16", reports=[report], skipped_count=2)
+
+    markdown = render_digest_markdown(digest)
+
+    assert markdown.index("## 今日速览") < markdown.index("## Top Items")
+    assert "### 1. A Good MI Paper" in markdown
+    assert "- 分数: 9" in markdown
+    assert "- 简单概述: 这篇文章提出了一个清晰的机制解释方法。" in markdown
+    assert "- 入选理由: strong selection reason" in markdown
+
+
+def test_render_digest_markdown_shortens_overview_fallback():
+    long_abstract = "这是一段用于兜底的很长摘要。" * 40
+    candidate = Candidate(
+        id="id-1",
+        source="arxiv",
+        title="A Good MI Paper",
+        url="https://example.com/paper",
+        published_at=datetime(2026, 6, 16, tzinfo=timezone.utc),
+        abstract=long_abstract,
+    )
+    report = DeepReport(
+        candidate=candidate,
+        relevance=RelevanceDecision(True, "Mechanistic Interpretability", 9, "relevant"),
+        score=QualityScore(9, 8, 9, 9, 8, 9, "must_read", "strong selection reason"),
+        markdown="## Details",
+        text_source="pdf",
+    )
+    digest = DailyDigest(run_date="2026-06-16", reports=[report], skipped_count=2)
+
+    markdown = render_digest_markdown(digest)
+
+    assert f"- 简单概述: {long_abstract}" not in markdown
+    assert "..." in markdown
+
+
 def test_render_digest_html_contains_visual_sections():
     candidate = Candidate(
         id="id-1",
@@ -48,6 +100,32 @@ def test_render_digest_html_contains_visual_sections():
     assert "<html" in html
     assert "A Good MI Paper" in html
     assert "score-badge" in html
+
+
+def test_render_digest_html_contains_daily_overview_before_cards():
+    candidate = Candidate(
+        id="id-1",
+        source="arxiv",
+        title="A Good MI Paper",
+        url="https://example.com/paper",
+        published_at=datetime(2026, 6, 16, tzinfo=timezone.utc),
+        abstract="abstract fallback",
+    )
+    report = DeepReport(
+        candidate=candidate,
+        relevance=RelevanceDecision(True, "Mechanistic Interpretability", 9, "relevant"),
+        score=QualityScore(9, 8, 9, 9, 8, 9, "must_read", "strong selection reason"),
+        markdown="## TL;DR\n这篇文章提出了一个清晰的机制解释方法。\n\n## Details\nLong report.",
+        text_source="pdf",
+    )
+    digest = DailyDigest(run_date="2026-06-16", reports=[report], skipped_count=2)
+
+    html = render_digest_html(digest)
+
+    assert html.index("今日速览") < html.index('<article class="report-card"')
+    assert "A Good MI Paper" in html
+    assert "这篇文章提出了一个清晰的机制解释方法。" in html
+    assert "strong selection reason" in html
 
 
 def test_markdown_to_html_compiles_markdown_and_preserves_math():

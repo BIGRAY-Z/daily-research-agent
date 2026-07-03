@@ -8,7 +8,10 @@ from pathlib import Path
 import markdown as markdown_lib
 
 from research_agent.models import DailyDigest, DeepReport, dataclass_to_jsonable
-from research_agent.text import slugify
+from research_agent.text import clean_text, slugify, truncate_text
+
+
+OVERVIEW_MAX_CHARS = 180
 
 
 def render_digest_markdown(digest: DailyDigest) -> str:
@@ -46,6 +49,9 @@ def render_digest_markdown(digest: DailyDigest) -> str:
         lines.append("今天没有筛选出新的高优先级文章。")
         return "\n".join(lines).strip() + "\n"
 
+    lines.extend(render_overview_markdown(digest.reports))
+    lines.append("")
+
     lines.append("## Top Items")
     for index, report in enumerate(digest.reports, start=1):
         candidate = report.candidate
@@ -66,6 +72,69 @@ def render_digest_markdown(digest: DailyDigest) -> str:
             ]
         )
     return "\n".join(lines).strip() + "\n"
+
+
+def render_overview_markdown(reports: list[DeepReport]) -> list[str]:
+    lines = ["## 今日速览"]
+    for index, report in enumerate(reports, start=1):
+        lines.extend(
+            [
+                "",
+                f"### {index}. {report.candidate.title}",
+                "",
+                f"- 分数: {format_score(report.score.overall)}",
+                f"- 简单概述: {overview_from_report(report)}",
+                f"- 入选理由: {selection_reason_from_report(report)}",
+            ]
+        )
+    return lines
+
+
+def overview_from_report(report: DeepReport) -> str:
+    for value in [
+        extract_tldr(report.markdown),
+        first_markdown_paragraph(report.markdown),
+        report.candidate.abstract,
+        report.candidate.body_text,
+    ]:
+        cleaned = clean_text(strip_markdown_markup(value or ""))
+        if cleaned:
+            return truncate_text(cleaned, OVERVIEW_MAX_CHARS).replace("\n", " ")
+    return "暂无可用概述。"
+
+
+def selection_reason_from_report(report: DeepReport) -> str:
+    return clean_text(report.score.reason) or "未提供评分理由。"
+
+
+def extract_tldr(markdown: str) -> str:
+    match = re.search(
+        r"^\s{0,3}#{1,6}\s*TL;DR\s*\n(?P<body>.*?)(?=^\s{0,3}#{1,6}\s+|\Z)",
+        markdown,
+        flags=re.IGNORECASE | re.MULTILINE | re.DOTALL,
+    )
+    if not match:
+        return ""
+    return first_markdown_paragraph(match.group("body"))
+
+
+def first_markdown_paragraph(markdown: str) -> str:
+    for block in re.split(r"\n\s*\n", markdown.strip()):
+        text = block.strip()
+        if not text or re.match(r"^\s{0,3}#{1,6}\s+", text):
+            continue
+        return text
+    return ""
+
+
+def strip_markdown_markup(markdown: str) -> str:
+    text = re.sub(r"^\s{0,3}#{1,6}\s+", "", markdown, flags=re.MULTILINE)
+    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+    text = re.sub(r"__(.*?)__", r"\1", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    return text
 
 
 def render_digest_html(digest: DailyDigest) -> str:
@@ -101,6 +170,8 @@ def render_digest_html(digest: DailyDigest) -> str:
 
     if not cards:
         cards.append('<article class="report-card"><p>今天没有筛选出新的高优先级文章。</p></article>')
+
+    overview_html = render_overview_html(digest.reports)
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -176,6 +247,41 @@ def render_digest_html(digest: DailyDigest) -> str:
       padding: 22px;
       margin: 18px 0;
       box-shadow: 0 8px 20px rgba(24, 32, 42, 0.05);
+    }}
+    .overview {{
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      margin: 18px 0 24px;
+    }}
+    .overview h2 {{
+      margin: 0 0 16px;
+    }}
+    .overview-list {{
+      display: grid;
+      gap: 14px;
+    }}
+    .overview-item {{
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }}
+    .overview-item:first-child {{
+      border-top: 0;
+      padding-top: 0;
+    }}
+    .overview-item h3 {{
+      margin: 0 0 8px;
+      border-top: 0;
+      padding-top: 0;
+    }}
+    .overview-score {{
+      color: var(--accent-2);
+      font-weight: 700;
+      margin: 0 0 6px;
+    }}
+    .overview-item p {{
+      margin: 6px 0;
     }}
     .report-header {{
       display: grid;
@@ -259,11 +365,38 @@ def render_digest_html(digest: DailyDigest) -> str:
         <div><span>报告失败</span><strong>{digest.report_failure_count}</strong></div>
       </div>
     </section>
+    {overview_html}
     {''.join(cards)}
   </main>
 </body>
 </html>
 """
+
+
+def render_overview_html(reports: list[DeepReport]) -> str:
+    if not reports:
+        return ""
+    items = []
+    for index, report in enumerate(reports, start=1):
+        candidate = report.candidate
+        items.append(
+            f"""
+            <article class="overview-item">
+              <h3>{index}. <a href="{escape(candidate.url)}">{escape(candidate.title)}</a></h3>
+              <p class="overview-score">分数: {format_score(report.score.overall)}</p>
+              <p><span>简单概述</span>{escape(overview_from_report(report))}</p>
+              <p><span>入选理由</span>{escape(selection_reason_from_report(report))}</p>
+            </article>
+            """
+        )
+    return f"""
+    <section class="overview">
+      <h2>今日速览</h2>
+      <div class="overview-list">
+        {''.join(items)}
+      </div>
+    </section>
+    """
 
 
 def markdown_to_basic_html(markdown: str) -> str:
