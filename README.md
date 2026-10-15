@@ -20,3 +20,24 @@
 - ACL/EMNLP/EACL 论文正在把 MI 拉向 NLP 任务、RAG、emotion inference、ICL、monosemanticity 评估和可用工具。
 - Reddit/X 的信号主要反映社区对 circuit tracing、symbolic extraction、pruning/knowledge removal、latent guardrails 的兴趣与质疑，不应替代论文证据。
 
+# Mechanistic Interpretability: Notes on Recent Work
+
+Search date: 2026-06-11
+
+This folder compiles recent work on mechanistic interpretability (MI) from 2025–2026, covering sources including arXiv, ACL Anthology, Reddit, X, Anthropic's Transformer Circuits, and OpenAI.
+
+Recommended reading order:
+
+1. [mi_latest_survey_2026-06-11.md](./mi_latest_survey_2026-06-11.md): Recent developments, methods, representative papers, and trends organized by research subarea.
+2. [next_work_cross_source.md](./next_work_cross_source.md): Highlights unfinished next steps mentioned by at least two distinct sources, ranked by the number of supporting sources, specificity, and feasibility.
+3. [sources_table.md](./sources_table.md): A source index listing channels, dates, and how each source is used as evidence.
+4. [method_notes.md](./method_notes.md): Search scope and criteria, credibility labels, and guidance for future updates.
+
+Key takeaways:
+
+- MI's central focus is shifting from "finding interpretable features" to "evaluating whether these features are stable, causally effective, and useful for circuit tracing and safety interventions."
+- Sparse autoencoders (SAEs) remain a central tool, but the focus in 2025–2026 has clearly shifted toward SAE evaluation, feature consistency, multidimensional and functional features, cross-layer and routing-based architectures, and limits of applicability.
+- Anthropic's work on attribution graphs and cross-layer transcoders advances "interpretable features" into "prompt-level computation graphs," while also exposing unresolved challenges involving long contexts, how attention patterns form, global circuits, faithfulness, and manual grouping.
+- OpenAI's sparse circuits approach represents the direction of "training models for interpretability," complementing post hoc SAE analysis and circuit tracing. Whether this approach can scale to frontier models remains unresolved.
+- ACL, EMNLP, and EACL papers are bringing MI into closer contact with NLP tasks, RAG, emotion inference, in-context learning (ICL), monosemanticity evaluation, and practical tools.
+- Signals from Reddit and X primarily reflect community interest in, and skepticism about, circuit tracing, symbolic extraction, pruning and knowledge removal, and latent guardrails. They should not substitute for evidence from research papers.
